@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>PhotoStudio Pro AI — 專業人像精修與美妝工作站</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; overflow: hidden; background: #1e1e1e; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif; }
+    .checkerboard {
+      background-color: #262626;
+      background-image: linear-gradient(45deg, #333 25%, transparent 25%),
+        linear-gradient(-45deg, #333 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #333 75%),
+        linear-gradient(-45deg, transparent 75%, #333 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+    .tool-btn {
+      width: 34px; height: 34px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      color: #bbb; transition: all 0.15s;
+    }
+    .tool-btn:hover { background: #383838; color: #fff; }
+    .tool-btn.active { background: #0284c7; color: #fff; box-shadow: 0 2px 6px rgba(2,132,199,0.4); }
+    .tab-btn {
+      padding: 9px 10px; color: #9ca3af; border-bottom: 2px solid transparent;
+      white-space: nowrap; transition: all 0.15s;
+    }
+    .tab-btn:hover { color: #fff; }
+    .tab-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; background: #262626; }
+    .slider-row { display: flex; align-items: center; gap: 8px; }
+    .slider-row span { width: 78px; color: #d1d5db; flex-shrink: 0; }
+    .slider-row input[type="range"] { flex: 1; accent-color: #38bdf8; height: 4px; cursor: pointer; }
+    .slider-row b { width: 28px; text-align: right; font-weight: 500; color: #93c5fd; font-size: 11px; }
+    .preset-btn, .filter-btn {
+      background: #1f1f1f; border: 1px solid #3f3f3f; border-radius: 6px;
+      padding: 6px 4px; text-align: center; color: #e5e7eb; transition: all 0.15s;
+    }
+    .preset-btn:hover, .filter-btn:hover { border-color: #38bdf8; color: #fff; }
+    .filter-btn.active, .preset-btn.active { background: #0369a1; border-color: #38bdf8; color: #fff; }
+    .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+    body.mobile-preview #workspace { flex-direction: column !important; }
+    body.mobile-preview #leftToolbar { display: none !important; }
+    body.mobile-preview #rightPanel { width: 100% !important; height: 44vh !important; border-left: 0 !important; border-top: 1px solid #3a3a3a !important; }
+  </style>
+</head>
+<body>
+<div id="app" class="flex flex-col h-screen w-screen overflow-hidden bg-[#1e1e1e] text-[#e0e0e0] select-none">
+  <header class="h-11 bg-[#282828] border-b border-[#3a3a3a] flex items-center justify-between px-3 shrink-0 z-30">
+    <div class="flex items-center gap-2">
+      <div class="flex items-center gap-1.5 text-sky-400 font-bold tracking-wide text-sm">
+        <i data-lucide="sparkles" class="w-4 h-4"></i>
+        <span>PhotoStudio Pro AI</span>
+      </div>
+      <span class="hidden sm:inline-block text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">1:1 原畫質無損</span>
+    </div>
+
+    <div class="flex items-center gap-1.5">
+      <label class="cursor-pointer bg-[#363636] hover:bg-[#444] text-xs px-2.5 py-1.5 rounded flex items-center gap-1.5 transition">
+        <i data-lucide="folder-open" class="w-3.5 h-3.5 text-amber-400"></i>
+        <span>開啟原圖</span>
+        <input type="file" id="fileInput" accept="image/*" class="hidden">
+      </label>
+
+      <label class="hidden md:flex cursor-pointer bg-[#363636] hover:bg-[#444] text-xs px-2.5 py-1.5 rounded items-center gap-1.5 transition">
+        <i data-lucide="layers" class="w-3.5 h-3.5 text-purple-400"></i>
+        <span>置入圖層</span>
+        <input type="file" id="layerInput" accept="image/*" class="hidden">
+      </label>
+
+      <button id="btnAiDetect" class="bg-indigo-600/80 hover:bg-indigo-500 text-white text-xs px-2.5 py-1.5 rounded flex items-center gap-1 transition" title="自動偵測五官特徵點">
+        <i data-lucide="scan-face" class="w-3.5 h-3.5"></i>
+        <span class="hidden sm:inline">AI 偵測五官</span>
+      </button>
+
+      <button id="btnUndo" class="bg-[#363636] hover:bg-[#444] p-1.5 rounded disabled:opacity-40" title="復原 (Ctrl+Z)">
+        <i data-lucide="undo-2" class="w-3.5 h-3.5"></i>
+      </button>
+      <button id="btnRedo" class="bg-[#363636] hover:bg-[#444] p-1.5 rounded disabled:opacity-40" title="重做 (Ctrl+Y)">
+        <i data-lucide="redo-2" class="w-3.5 h-3.5"></i>
+      </button>
+
+      <button id="btnCompare" class="bg-[#363636] active:bg-sky-600 text-xs px-2 py-1.5 rounded flex items-center gap-1" title="按住對比原圖">
+        <i data-lucide="split-square-horizontal" class="w-3.5 h-3.5"></i>
+        <span class="hidden lg:inline">對比原圖</span>
+      </button>
+
+      <button id="btnToggleMobile" class="hidden md:flex bg-[#363636] hover:bg-[#444] text-xs px-2 py-1.5 rounded items-center gap-1 text-amber-300" title="切換電腦/手機版面預覽">
+        <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+        <span>手機預覽</span>
+      </button>
+
+      <button id="btnExportModal" class="bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium px-3 py-1.5 rounded flex items-center gap-1.5 shadow">
+        <i data-lucide="download" class="w-3.5 h-3.5"></i>
+        <span>無損匯出</span>
+      </button>
+    </div>
+  </header>
+
+  <div id="workspace" class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+    <aside id="leftToolbar" class="hidden md:flex w-12 bg-[#252525] border-r border-[#3a3a3a] flex-col items-center py-2 gap-1.5 shrink-0 z-20">
+      <button class="tool-btn active" data-tool="move" title="移動 / 縮放畫布 (V)"><i data-lucide="mouse-pointer-2" class="w-4 h-4"></i></button>
+      <button class="tool-btn" data-tool="liquify" title="液化推擠 / 膨脹 / 收縮 (L)"><i data-lucide="waves" class="w-4 h-4"></i></button>
+      <button class="tool-btn" data-tool="heal" title="祛斑祛痘修復筆 (J)"><i data-lucide="bandage" class="w-4 h-4"></i></button>
+      <button class="tool-btn" data-tool="inpaint" title="AI 智慧消除筆 / 雜物移除 (E)"><i data-lucide="eraser" class="w-4 h-4"></i></button>
+      <button class="tool-btn" data-tool="wand" title="智慧魔術棒去背 (W)"><i data-lucide="wand-2" class="w-4 h-4"></i></button>
+      <button class="tool-btn" data-tool="text" title="新增無損文字圖層 (T)"><i data-lucide="type" class="w-4 h-4"></i></button>
+      <div class="w-7 h-[1px] bg-[#3a3a3a] my-1"></div>
+      <button id="btnZoomIn" class="tool-btn" title="放大 (+)"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
+      <button id="btnZoomOut" class="tool-btn" title="縮小 (-)"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
+      <button id="btnZoomFit" class="tool-btn" title="符合螢幕 (Ctrl+0)"><i data-lucide="maximize-2" class="w-4 h-4"></i></button>
+    </aside>
+
+    <main id="canvasContainer" class="flex-1 relative bg-[#161616] overflow-hidden flex items-center justify-center touch-none">
+      <div id="brushBar" class="hidden absolute top-2.5 left-1/2 -translate-x-1/2 bg-[#2a2a2a]/95 backdrop-blur border border-[#444] rounded-full px-3.5 py-1.5 flex items-center gap-3 text-xs z-20 shadow-lg">
+        <span id="brushTitle" class="font-medium text-sky-400">液化工具</span>
+        <div id="liquifyModes" class="flex items-center gap-1 border-l border-[#444] pl-2">
+          <button class="liq-mode active px-2 py-0.5 rounded bg-sky-600 text-white" data-mode="push">推擠</button>
+          <button class="liq-mode px-2 py-0.5 rounded hover:bg-[#3a3a3a]" data-mode="bloat">放大</button>
+          <button class="liq-mode px-2 py-0.5 rounded hover:bg-[#3a3a3a]" data-mode="pucker">縮小</button>
+          <button class="liq-mode px-2 py-0.5 rounded hover:bg-[#3a3a3a]" data-mode="restore">還原</button>
+        </div>
+        <div class="flex items-center gap-1.5 border-l border-[#444] pl-2">
+          <span class="text-gray-400">大小</span>
+          <input type="range" id="brushSize" min="10" max="180" value="55" class="w-20 accent-sky-400">
+          <span id="brushSizeVal" class="w-7 text-right">55</span>
+        </div>
+        <div class="flex items-center gap-1.5 border-l border-[#444] pl-2">
+          <span class="text-gray-400">強度</span>
+          <input type="range" id="brushStrength" min="10" max="100" value="45" class="w-16 accent-sky-400">
+        </div>
+      </div>
+
+      <div id="canvasWrapper" class="relative shadow-2xl checkerboard origin-center transition-transform duration-75">
+        <canvas id="mainCanvas"></canvas>
+        <canvas id="overlayCanvas" class="absolute inset-0 pointer-events-none"></canvas>
+      </div>
+
+      <div id="loupe" class="hidden absolute top-3 left-3 w-28 h-28 rounded-full border-2 border-sky-400 shadow-2xl overflow-hidden pointer-events-none z-30 bg-[#111]">
+        <canvas id="loupeCanvas" width="112" height="112"></canvas>
+        <div class="absolute inset-0 flex items-center justify-center">
+          <div class="w-2 h-2 rounded-full border border-sky-300/80"></div>
+        </div>
+      </div>
+
+      <div class="absolute bottom-2 left-3 bg-[#252525]/90 border border-[#3a3a3a] rounded px-2.5 py-1 text-[11px] text-gray-300 flex items-center gap-3 pointer-events-none">
+        <span id="infoResolution">900 × 1125 px (原畫質)</span>
+        <span id="infoZoom">100%</span>
+        <span id="infoFaceStatus" class="text-emerald-400">● 五官已定位</span>
+      </div>
+    </main>
+
+    <aside id="rightPanel" class="w-full md:w-80 h-[44vh] md:h-auto bg-[#252525] border-t md:border-t-0 md:border-l border-[#3a3a3a] flex flex-col shrink-0 z-20">
+      <div class="flex border-b border-[#3a3a3a] bg-[#202020] text-xs font-medium overflow-x-auto shrink-0">
+        <button class="tab-btn active" data-tab="portrait">人像精修</button>
+        <button class="tab-btn" data-tab="makeup">自動美妝</button>
+        <button class="tab-btn" data-tab="filters">質感濾鏡</button>
+        <button class="tab-btn" data-tab="curves">調色曲線</button>
+        <button class="tab-btn" data-tab="cutout">去背消除</button>
+        <button class="tab-btn" data-tab="layers">圖層</button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-3 space-y-4 text-xs custom-scroll">
+        <div id="tab-portrait" class="tab-content space-y-3.5">
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2.5">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-sky-300 flex items-center gap-1"><i data-lucide="sparkles" class="w-3.5 h-3.5"></i> 高低頻無損磨皮</span>
+              <button id="btnResetPortrait" class="text-[11px] text-gray-400 hover:text-white">重設參數</button>
+            </div>
+            <div class="slider-row"><span>柔膚磨皮</span><input type="range" data-param="smooth" min="0" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>毛孔質感保留</span><input type="range" data-param="texture" min="0" max="100" value="75"><b>75</b></div>
+            <div class="slider-row"><span>冷白提亮</span><input type="range" data-param="whiten" min="0" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>淡化黑眼圈</span><input type="range" data-param="darkCircle" min="0" max="100" value="0"><b>0</b></div>
+          </div>
+
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2.5">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-pink-300 flex items-center gap-1"><i data-lucide="smile" class="w-3.5 h-3.5"></i> 五官與身材精修</span>
+              <label class="flex items-center gap-1 text-[11px] text-gray-300 cursor-pointer">
+                <input type="checkbox" id="chkShowLandmarks" class="accent-sky-400"> 顯示網格
+              </label>
+            </div>
+            <div class="slider-row"><span>精緻瘦臉</span><input type="range" data-param="slimFace" min="-50" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>放大雙眼</span><input type="range" data-param="bigEyes" min="-30" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>縮小鼻翼</span><input type="range" data-param="slimNose" min="-30" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>微笑弧度</span><input type="range" data-param="smile" min="-40" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>纖腰塑形</span><input type="range" data-param="slimWaist" min="0" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>拉長腿部比例</span><input type="range" data-param="longLegs" min="0" max="100" value="0"><b>0</b></div>
+          </div>
+
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2">
+            <span class="font-semibold text-amber-300 flex items-center gap-1"><i data-lucide="aperture" class="w-3.5 h-3.5"></i> 人像光學背景虛化</span>
+            <div class="slider-row"><span>大光圈散景</span><input type="range" data-param="bokeh" min="0" max="100" value="0"><b>0</b></div>
+          </div>
+        </div>
+
+        <div id="tab-makeup" class="tab-content hidden space-y-3">
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2">
+            <div class="flex justify-between items-center">
+              <span class="font-semibold text-rose-300">一鍵主題全妝預設</span>
+              <button id="btnClearMakeup" class="text-[11px] text-gray-400 hover:text-white">一鍵卸妝</button>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5" id="makeupPresets">
+              <button class="preset-btn" data-preset="natural">清透偽素顏</button>
+              <button class="preset-btn" data-preset="peach">日雜蜜桃妝</button>
+              <button class="preset-btn" data-preset="korean">韓系水光冷</button>
+              <button class="preset-btn" data-preset="tipsy">純欲微醺妝</button>
+              <button class="preset-btn" data-preset="smoky">歐美小煙燻</button>
+              <button class="preset-btn" data-preset="hk">復古港風紅</button>
+            </div>
+          </div>
+
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2.5">
+            <span class="font-semibold text-sky-300">分部位無損彩妝微調</span>
+            <div class="slider-row"><span>清透底妝</span><input type="range" data-mk="foundation" min="0" max="100" value="0"><b>0</b></div>
+            <div class="flex items-center justify-between gap-2">
+              <span>眉型與濃淡</span>
+              <select id="mkBrowStyle" class="bg-[#1e1e1e] border border-[#444] rounded px-1.5 py-0.5 text-[11px]">
+                <option value="wild">野生眉</option>
+                <option value="flat">韓系平眉</option>
+                <option value="arch">彎月眉</option>
+              </select>
+              <input type="range" data-mk="brow" min="0" max="100" value="0" class="w-24 accent-rose-400">
+            </div>
+            <div class="slider-row"><span>眼影與臥蠶</span><input type="range" data-mk="eyeshadow" min="0" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>內眼線睫毛</span><input type="range" data-mk="eyeliner" min="0" max="100" value="0"><b>0</b></div>
+            <div class="flex items-center justify-between gap-2">
+              <span>變色美瞳</span>
+              <select id="mkLensColor" class="bg-[#1e1e1e] border border-[#444] rounded px-1.5 py-0.5 text-[11px]">
+                <option value="#6b4423">琥珀暖棕</option>
+                <option value="#5b6d7c">混血冷灰</option>
+                <option value="#2d4c6b">星夜深藍</option>
+              </select>
+              <input type="range" data-mk="lens" min="0" max="100" value="0" class="w-24 accent-rose-400">
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span>腮紅畫法</span>
+              <select id="mkBlushStyle" class="bg-[#1e1e1e] border border-[#444] rounded px-1.5 py-0.5 text-[11px]">
+                <option value="apple">蘋果肌</option>
+                <option value="drunk">眼下微醺</option>
+                <option value="contour">斜向修容</option>
+              </select>
+              <input type="range" data-mk="blush" min="0" max="100" value="0" class="w-24 accent-rose-400">
+            </div>
+            <div class="slider-row"><span>鼻影高光修容</span><input type="range" data-mk="contour" min="0" max="100" value="0"><b>0</b></div>
+            <div class="space-y-1.5 pt-1 border-t border-[#3c3c3c]">
+              <div class="flex items-center justify-between">
+                <span>唇色與質感</span>
+                <div class="flex gap-1" id="lipColors">
+                  <button class="w-4 h-4 rounded-full border border-white/60 bg-[#d96b6b]" data-color="#d96b6b"></button>
+                  <button class="w-4 h-4 rounded-full border border-white/60 bg-[#c93b4b]" data-color="#c93b4b"></button>
+                  <button class="w-4 h-4 rounded-full border border-white/60 bg-[#e07a5f]" data-color="#e07a5f"></button>
+                  <button class="w-4 h-4 rounded-full border border-white/60 bg-[#8e2430]" data-color="#8e2430"></button>
+                </div>
+                <select id="mkLipFinish" class="bg-[#1e1e1e] border border-[#444] rounded px-1.5 py-0.5 text-[11px]">
+                  <option value="glossy">水光玻璃唇</option>
+                  <option value="matte">絲絨霧面</option>
+                  <option value="gradient">韓系咬唇</option>
+                </select>
+              </div>
+              <div class="slider-row"><span>唇妝顯色度</span><input type="range" data-mk="lipstick" min="0" max="100" value="0"><b>0</b></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-filters" class="tab-content hidden space-y-3">
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2.5">
+            <span class="font-semibold text-amber-300">美圖日韓膠片質感濾鏡</span>
+            <div class="grid grid-cols-3 gap-1.5" id="filterGrid">
+              <button class="filter-btn active" data-filter="none">原圖無濾鏡</button>
+              <button class="filter-btn" data-filter="cream">清透奶油</button>
+              <button class="filter-btn" data-filter="jpfilm">日雜膠片</button>
+              <button class="filter-btn" data-filter="kcool">韓系冷白</button>
+              <button class="filter-btn" data-filter="peach">純欲蜜桃</button>
+              <button class="filter-btn" data-filter="hkretro">復古港風</button>
+              <button class="filter-btn" data-filter="forest">森系清新</button>
+              <button class="filter-btn" data-filter="french">法式高級灰</button>
+              <button class="filter-btn" data-filter="bw">黑白寫真</button>
+            </div>
+            <div class="slider-row pt-1"><span>濾鏡強度</span><input type="range" id="filterIntensity" min="0" max="100" value="80"><b>80%</b></div>
+          </div>
+
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2">
+            <span class="font-semibold text-purple-300">無損文字與裝飾貼紙圖層</span>
+            <div class="flex gap-1.5">
+              <input type="text" id="textLayerInput" placeholder="輸入雜誌標題文字..." class="flex-1 bg-[#1c1c1c] border border-[#444] rounded px-2 py-1 text-xs">
+              <input type="color" id="textLayerColor" value="#ffffff" class="w-7 h-7 bg-transparent border-0 cursor-pointer">
+              <button id="btnAddText" class="bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1 rounded">加入文字</button>
+            </div>
+            <div class="flex flex-wrap gap-1.5 pt-1" id="stickerPalette">
+              <button class="sticker-btn text-base bg-[#1e1e1e] hover:bg-[#383838] px-2 py-1 rounded">✨</button>
+              <button class="sticker-btn text-base bg-[#1e1e1e] hover:bg-[#383838] px-2 py-1 rounded">🦋</button>
+              <button class="sticker-btn text-base bg-[#1e1e1e] hover:bg-[#383838] px-2 py-1 rounded">🌸</button>
+              <button class="sticker-btn text-base bg-[#1e1e1e] hover:bg-[#383838] px-2 py-1 rounded">💖</button>
+              <button class="sticker-btn text-base bg-[#1e1e1e] hover:bg-[#383838] px-2 py-1 rounded">🎀</button>
+              <button class="sticker-btn text-base bg-[#1e1e1e] hover:bg-[#383838] px-2 py-1 rounded">👑</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-curves" class="tab-content hidden space-y-3">
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2">
+            <div class="flex justify-between items-center">
+              <div class="flex gap-1" id="curveChannels">
+                <button class="ch-btn active px-2 py-0.5 rounded bg-white text-black font-bold" data-ch="rgb">RGB</button>
+                <button class="ch-btn px-2 py-0.5 rounded bg-[#1e1e1e] text-red-400" data-ch="r">紅</button>
+                <button class="ch-btn px-2 py-0.5 rounded bg-[#1e1e1e] text-green-400" data-ch="g">綠</button>
+                <button class="ch-btn px-2 py-0.5 rounded bg-[#1e1e1e] text-blue-400" data-ch="b">藍</button>
+              </div>
+              <button id="btnResetCurves" class="text-[11px] text-gray-400 hover:text-white">重設曲線</button>
+            </div>
+            <canvas id="curveCanvas" width="260" height="160" class="w-full h-40 bg-[#181818] border border-[#444] rounded cursor-crosshair"></canvas>
+            <p class="text-[10px] text-gray-400">點擊新增控制點、拖曳調整亮度對比、雙擊移除節點</p>
+          </div>
+
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2">
+            <div class="slider-row"><span>曝光度</span><input type="range" data-adj="exposure" min="-100" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>對比度</span><input type="range" data-adj="contrast" min="-100" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>飽和度</span><input type="range" data-adj="saturation" min="-100" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>色溫冷暖</span><input type="range" data-adj="temp" min="-100" max="100" value="0"><b>0</b></div>
+            <div class="slider-row"><span>清晰銳化</span><input type="range" data-adj="sharpen" min="0" max="100" value="0"><b>0</b></div>
+          </div>
+        </div>
+
+        <div id="tab-cutout" class="tab-content hidden space-y-3">
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2.5">
+            <span class="font-semibold text-emerald-300 flex items-center gap-1"><i data-lucide="scissors" class="w-3.5 h-3.5"></i> AI 智慧主體去背</span>
+            <div class="slider-row"><span>去背容差</span><input type="range" id="bgTolerance" min="5" max="120" value="38"><b>38</b></div>
+            <div class="slider-row"><span>邊緣羽化</span><input type="range" id="bgFeather" min="0" max="10" value="2"><b>2</b></div>
+            <button id="btnAutoCutout" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded font-medium">執行 AI 一鍵去背</button>
+            <div class="pt-1 border-t border-[#3c3c3c]">
+              <span class="text-[11px] text-gray-400 block mb-1.5">證件照 / 純色背景替換：</span>
+              <div class="grid grid-cols-4 gap-1.5">
+                <button class="bg-preset py-1 rounded border border-[#555] bg-transparent text-[11px]" data-bg="transparent">透明</button>
+                <button class="bg-preset py-1 rounded bg-white text-black font-medium text-[11px]" data-bg="#ffffff">純白底</button>
+                <button class="bg-preset py-1 rounded bg-[#2b6cb0] text-white text-[11px]" data-bg="#2b6cb0">證件藍</button>
+                <button class="bg-preset py-1 rounded bg-[#c53030] text-white text-[11px]" data-bg="#c53030">證件紅</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-[#2e2e2e] p-2.5 rounded-lg border border-[#3c3c3c] space-y-2">
+            <span class="font-semibold text-sky-300 flex items-center gap-1"><i data-lucide="eraser" class="w-3.5 h-3.5"></i> 智慧修復與雜物消除</span>
+            <p class="text-[11px] text-gray-300 leading-relaxed">切換至「AI 智慧消除筆」或「祛斑修復筆」，直接在畫布塗抹路人、電線或痘印即可無痕填補。</p>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button id="btnSelectInpaint" class="bg-[#3a3a3a] hover:bg-sky-600 py-1.5 rounded">啟用雜物消除筆</button>
+              <button id="btnSelectHeal" class="bg-[#3a3a3a] hover:bg-sky-600 py-1.5 rounded">啟用祛斑修復筆</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-layers" class="tab-content hidden space-y-2.5">
+          <div class="flex items-center justify-between gap-2 bg-[#2e2e2e] p-2 rounded border border-[#3c3c3c]">
+            <select id="layerBlendMode" class="bg-[#1c1c1c] border border-[#444] rounded px-2 py-1 text-xs">
+              <option value="source-over">正常 (Normal)</option>
+              <option value="multiply">色彩增值 (Multiply)</option>
+              <option value="screen">濾色 (Screen)</option>
+              <option value="overlay">覆蓋 (Overlay)</option>
+              <option value="soft-light">柔光 (Soft Light)</option>
+            </select>
+            <div class="flex items-center gap-1">
+              <span class="text-[11px] text-gray-400">不透明度</span>
+              <input type="range" id="layerOpacity" min="0" max="100" value="100" class="w-16 accent-sky-400">
+            </div>
+          </div>
+          <div id="layerList" class="space-y-1.5"></div>
+        </div>
+      </div>
+
+      <div class="flex md:hidden bg-[#1e1e1e] border-t border-[#3a3a3a] justify-around py-1.5 text-[10px] shrink-0">
+        <button class="mob-tool text-sky-400 flex flex-col items-center gap-0.5" data-tool="move"><i data-lucide="hand" class="w-4 h-4"></i>移動縮放</button>
+        <button class="mob-tool flex flex-col items-center gap-0.5" data-tool="liquify"><i data-lucide="waves" class="w-4 h-4"></i>液化推臉</button>
+        <button class="mob-tool flex flex-col items-center gap-0.5" data-tool="heal"><i data-lucide="bandage" class="w-4 h-4"></i>祛斑修復</button>
+        <button class="mob-tool flex flex-col items-center gap-0.5" data-tool="inpaint"><i data-lucide="eraser" class="w-4 h-4"></i>智慧消除</button>
+        <button class="mob-tool flex flex-col items-center gap-0.5" data-tool="wand"><i data-lucide="wand-2" class="w-4 h-4"></i>魔術去背</button>
+      </div>
+    </aside>
+  </div>
+
+  <div id="exportModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-[#282828] border border-[#444] rounded-xl w-full max-w-sm p-4 space-y-4 shadow-2xl text-xs">
+      <div class="flex justify-between items-center border-b border-[#3a3a3a] pb-2.5">
+        <span class="font-bold text-sm text-white">無損轉檔與高畫質匯出</span>
+        <button id="btnCloseExport" class="text-gray-400 hover:text-white"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="space-y-2.5">
+        <div>
+          <label class="block text-gray-400 mb-1">匯出檔案格式</label>
+          <select id="exportFormat" class="w-full bg-[#1c1c1c] border border-[#444] rounded px-2.5 py-1.5 text-white">
+            <option value="image/png">PNG — 100% 無損原畫質（保留透明背景）</option>
+            <option value="image/jpeg">JPG — 最高畫質相片格式</option>
+            <option value="image/webp">WebP — 現代高壓縮無損格式</option>
+          </select>
+        </div>
+        <div>
+          <div class="flex justify-between mb-1"><span class="text-gray-400">影像品質</span><b id="exportQualityVal">100%</b></div>
+          <input type="range" id="exportQuality" min="50" max="100" value="100" class="w-full accent-sky-400">
+        </div>
+        <div>
+          <label class="block text-gray-400 mb-1">輸出解析度比例（預設 1:1 原始像素）</label>
+          <select id="exportScale" class="w-full bg-[#1c1c1c] border border-[#444] rounded px-2.5 py-1.5 text-white">
+            <option value="1">100% 原始尺寸 (無損原圖)</option>
+            <option value="0.75">75% 高畫質</option>
+            <option value="0.5">50% 社群分享尺寸</option>
+          </select>
+        </div>
+      </div>
+      <button id="btnConfirmExport" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold py-2 rounded-lg shadow">立即下載高畫質成品</button>
+    </div>
+  </div>
+</div>
+
+<script>
+lucide.createIcons();
+
+const state = {
+  width: 900,
+  height: 1125,
+  zoom: 0.65,
+  panX: 0,
+  panY: 0,
+  tool: 'move',
+  liquifyMode: 'push',
+  brushSize: 55,
+  brushStrength: 45,
+  layers: [],
+  activeLayerId: null,
+  history: [],
+  historyIndex: -1,
+  comparing: false,
+  bgColor: 'transparent',
+  landmarks: null,
+  portrait: { smooth: 0, texture: 75, whiten: 0, darkCircle: 0, slimFace: 0, bigEyes: 0, slimNose: 0, smile: 0, slimWaist: 0, longLegs: 0, bokeh: 0 },
+  makeup: { foundation: 0, brow: 0, browStyle: 'wild', eyeshadow: 0, eyeliner: 0, lens: 0, lensColor: '#6b4423', blush: 0, blushStyle: 'apple', contour: 0, lipstick: 0, lipColor: '#d96b6b', lipFinish: 'glossy' },
+  filter: { name: 'none', intensity: 80 },
+  adj: { exposure: 0, contrast: 0, saturation: 0, temp: 0, sharpen: 0 },
+  curves: {
+    active: 'rgb',
+    rgb: [{x:0,y:0},{x:255,y:255}],
+    r: [{x:0,y:0},{x:255,y:255}],
+    g: [{x:0,y:0},{x:255,y:255}],
+    b: [{x:0,y:0},{x:255,y:255}]
+  }
+};
+
+const mainCanvas = document.getElementById('mainCanvas');
+const ctx = mainCanvas.getContext('2d', { willReadFrequently: true });
+const overlayCanvas = document.getElementById('overlayCanvas');
+const octx = overlayCanvas.getContext('2d');
+const wrapper = document.getElementById('canvasWrapper');
+const container = document.getElementById('canvasContainer');
+
+function createDemoPortrait() {
+  const c = document.createElement('canvas');
+  c.width = state.width; c.height = state.height;
+  const g = c.getContext('2d');
+
+  const bg = g.createLinearGradient(0, 0, c.width, c.height);
+  bg.addColorStop(0, '#d8cfc6'); bg.addColorStop(1, '#b5a89c');
+  g.fillStyle = bg; g.fillRect(0, 0, c.width, c.height);
+
+  g.fillStyle = '#c4b7aa'; g.fillRect(80, 120, 260, 880);
+  g.fillStyle = '#cbbeb1'; g.beginPath(); g.arc(720, 260, 140, 0, Math.PI * 2); g.fill();
+
+  const cx = c.width / 2, cy = 470;
+  g.fillStyle = '#2c221e';
+  g.beginPath(); g.ellipse(cx, cy + 80, 225, 360, 0, 0, Math.PI * 2); g.fill();
+
+  g.fillStyle = '#f2cbb5';
+  g.fillRect(cx - 58, cy + 170, 116, 140);
+  g.fillStyle = '#f7f5f2';
+  g.beginPath(); g.ellipse(cx, cy + 430, 260, 210, 0, Math.PI, Math.PI * 2); g.fill();
+
+  const skinGrad = g.createRadialGradient(cx - 20, cy - 30, 30, cx, cy, 210);
+  skinGrad.addColorStop(0, '#fae0cf'); skinGrad.addColorStop(0.75, '#f1c6ae'); skinGrad.addColorStop(1, '#e0ae92');
+  g.fillStyle = skinGrad;
+  g.beginPath();
+  g.moveTo(cx - 145, cy - 40);
+  g.bezierCurveTo(cx - 150, cy - 210, cx + 150, cy - 210, cx + 145, cy - 40);
+  g.bezierCurveTo(cx + 140, cy + 115, cx + 65, cy + 195, cx, cy + 202);
+  g.bezierCurveTo(cx - 65, cy + 195, cx - 140, cy + 115, cx - 145, cy - 40);
+  g.fill();
+
+  g.fillStyle = 'rgba(175, 115, 85, 0.35)';
+  [[cx-75, cy+25, 4], [cx+82, cy+32, 3.5], [cx-55, cy+55, 3], [cx+62, cy+18, 3]].forEach(([x,y,r]) => {
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  });
+
+  g.strokeStyle = '#3b2d26'; g.lineWidth = 10; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(cx - 108, cy - 58); g.quadraticCurveTo(cx - 68, cy - 72, cx - 32, cy - 56); g.stroke();
+  g.beginPath(); g.moveTo(cx + 32, cy - 56); g.quadraticCurveTo(cx + 68, cy - 72, cx + 108, cy - 58); g.stroke();
+
+  [-68, 68].forEach(dx => {
+    g.fillStyle = '#fff';
+    g.beginPath(); g.ellipse(cx + dx, cy - 22, 32, 17, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#3a2820';
+    g.beginPath(); g.arc(cx + dx, cy - 22, 14, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#111';
+    g.beginPath(); g.arc(cx + dx, cy - 22, 7, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff';
+    g.beginPath(); g.arc(cx + dx - 5, cy - 26, 3.5, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = '#2b1e19'; g.lineWidth = 4;
+    g.beginPath(); g.arc(cx + dx, cy - 20, 32, Math.PI * 1.12, Math.PI * 1.88); g.stroke();
+  });
+
+  g.strokeStyle = 'rgba(185, 130, 105, 0.35)'; g.lineWidth = 6;
+  g.beginPath(); g.moveTo(cx - 14, cy - 15); g.lineTo(cx - 16, cy + 48); g.stroke();
+  g.beginPath(); g.moveTo(cx + 14, cy - 15); g.lineTo(cx + 16, cy + 48); g.stroke();
+  g.fillStyle = 'rgba(255,245,238,0.55)';
+  g.beginPath(); g.ellipse(cx, cy + 46, 12, 8, 0, 0, Math.PI * 2); g.fill();
+
+  g.fillStyle = '#d9827c';
+  g.beginPath();
+  g.moveTo(cx - 46, cy + 108);
+  g.quadraticCurveTo(cx - 18, cy + 94, cx, cy + 101);
+  g.quadraticCurveTo(cx + 18, cy + 94, cx + 46, cy + 108);
+  g.quadraticCurveTo(cx + 22, cy + 132, cx, cy + 132);
+  g.quadraticCurveTo(cx - 22, cy + 132, cx - 46, cy + 108);
+  g.fill();
+
+  g.fillStyle = '#241b17';
+  g.beginPath();
+  g.moveTo(cx - 165, cy - 30);
+  g.quadraticCurveTo(cx - 160, cy - 225, cx, cy - 225);
+  g.quadraticCurveTo(cx + 160, cy - 225, cx + 165, cy - 30);
+  g.quadraticCurveTo(cx + 135, cy - 120, cx + 30, cy - 115);
+  g.quadraticCurveTo(cx - 80, cy - 115, cx - 165, cy - 30);
+  g.fill();
+
+  return c;
+}
+
+function getDefaultLandmarks() {
+  const cx = state.width / 2, cy = state.height * 0.42;
+  return {
+    cx, cy,
+    leftEye: { x: cx - state.width * 0.075, y: cy - state.height * 0.02 },
+    rightEye: { x: cx + state.width * 0.075, y: cy - state.height * 0.02 },
+    leftBrow: [{x:cx-108,y:cy-58},{x:cx-68,y:cy-68},{x:cx-32,y:cy-56}],
+    rightBrow: [{x:cx+32,y:cy-56},{x:cx+68,y:cy-68},{x:cx+108,y:cy-58}],
+    nose: { x: cx, y: cy + state.height * 0.04 },
+    mouth: { x: cx, y: cy + state.height * 0.1, w: state.width * 0.05, h: state.height * 0.015 },
+    leftCheek: { x: cx - state.width * 0.095, y: cy + state.height * 0.03 },
+    rightCheek: { x: cx + state.width * 0.095, y: cy + state.height * 0.03 },
+    chin: { x: cx, y: cy + state.height * 0.18 },
+    waistY: cy + state.height * 0.3,
+    legY: cy + state.height * 0.42
+  };
+}
+
+function initApp() {
+  mainCanvas.width = overlayCanvas.width = state.width;
+  mainCanvas.height = overlayCanvas.height = state.height;
+  const demo = createDemoPortrait();
+  addLayer('人像主圖層', demo);
+  state.landmarks = getDefaultLandmarks();
+  fitCanvasToScreen();
+  saveHistory();
+  renderAll();
+  drawCurveEditor();
+}
+
+function addLayer(name, sourceCanvas, type = 'image', meta = {}) {
+  const id = 'layer_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  state.layers.push({ id, name, canvas: sourceCanvas, visible: true, opacity: 1, blend: 'source-over', type, x: 0, y: 0, meta });
+  state.activeLayerId = id;
+  updateLayerPanel();
+}
+
+function getActiveLayer() {
+  return state.layers.find(l => l.id === state.activeLayerId) || state.layers[0];
+}
+
+function saveHistory() {
+  const active = getActiveLayer();
+  if (!active || active.type !== 'image') return;
+  const snap = document.createElement('canvas');
+  snap.width = active.canvas.width; snap.height = active.canvas.height;
+  snap.getContext('2d').drawImage(active.canvas, 0, 0);
+  state.history = state.history.slice(0, state.historyIndex + 1);
+  state.history.push({ layerId: active.id, canvas: snap });
+  if (state.history.length > 20) state.history.shift();
+  state.historyIndex = state.history.length - 1;
+}
+
+function undo() {
+  if (state.historyIndex <= 0) return;
+  state.historyIndex--;
+  const item = state.history[state.historyIndex];
+  const layer = state.layers.find(l => l.id === item.layerId);
+  if (layer) {
+    layer.canvas.getContext('2d').clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+    layer.canvas.getContext('2d').drawImage(item.canvas, 0, 0);
+    renderAll();
+  }
+}
+
+function redo() {
+  if (state.historyIndex >= state.history.length - 1) return;
+  state.historyIndex++;
+  const item = state.history[state.historyIndex];
+  const layer = state.layers.find(l => l.id === item.layerId);
+  if (layer) {
+    layer.canvas.getContext('2d').clearRect(0, 0, layer.canvas.width, layer.canvas.height);
+    layer.canvas.getContext('2d').drawImage(item.canvas, 0, 0);
+    renderAll();
+  }
+}
+
+function renderAll() {
+  ctx.clearRect(0, 0, state.width, state.height);
+  if (state.bgColor !== 'transparent') {
+    ctx.fillStyle = state.bgColor;
+    ctx.fillRect(0, 0, state.width, state.height);
+  }
+
+  state.layers.forEach(layer => {
+    if (!layer.visible) return;
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    ctx.globalCompositeOperation = layer.blend;
+    if (layer.type === 'text') {
+      ctx.font = `bold ${layer.meta.size || 56}px "Noto Sans TC", sans-serif`;
+      ctx.fillStyle = layer.meta.color || '#ffffff';
+      ctx.shadowColor = 'rgba(0,0,0,0.45)';
+      ctx.shadowBlur = 12;
+      ctx.fillText(layer.meta.text, layer.x, layer.y);
+    } else if (layer.type === 'sticker') {
+      ctx.font = `${layer.meta.size || 96}px serif`;
+      ctx.fillText(layer.meta.emoji, layer.x, layer.y);
+    } else {
+      ctx.drawImage(layer.canvas, layer.x, layer.y);
+    }
+    ctx.restore();
+  });
+
+  if (state.comparing) {
+    drawOverlayLandmarks();
+    return;
+  }
+
+  if (state.portrait.bokeh > 0 && state.landmarks) {
+    applyPortraitBokeh(state.portrait.bokeh / 100);
+  }
+
+  applyPortraitWarp();
+  applyPixelAdjustments();
+  applyAutoMakeup();
+  drawOverlayLandmarks();
+}
+
+function applyPortraitBokeh(amount) {
+  const temp = document.createElement('canvas');
+  temp.width = state.width; temp.height = state.height;
+  const tctx = temp.getContext('2d');
+  tctx.filter = `blur(${Math.round(amount * 24)}px)`;
+  tctx.drawImage(mainCanvas, 0, 0);
+
+  const lm = state.landmarks;
+  const mask = document.createElement('canvas');
+  mask.width = state.width; mask.height = state.height;
+  const mctx = mask.getContext('2d');
+  const grad = mctx.createRadialGradient(lm.cx, lm.cy + 80, state.width * 0.22, lm.cx, lm.cy + 80, state.width * 0.62);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,1)');
+  mctx.fillStyle = grad;
+  mctx.fillRect(0, 0, state.width, state.height);
+
+  tctx.globalCompositeOperation = 'destination-in';
+  tctx.drawImage(mask, 0, 0);
+  ctx.drawImage(temp, 0, 0);
+}
+
+function applyPortraitWarp() {
+  const p = state.portrait;
+  const lm = state.landmarks;
+  if (!lm) return;
+  const hasWarp = p.slimFace || p.bigEyes || p.slimNose || p.smile || p.slimWaist || p.longLegs;
+  if (!hasWarp) return;
+
+  const srcData = ctx.getImageData(0, 0, state.width, state.height);
+  const dstData = ctx.createImageData(state.width, state.height);
+  const s = srcData.data, d = dstData.data;
+  const w = state.width, h = state.height;
+
+  const legStretch = 1 + (p.longLegs / 100) * 0.14;
+  const legStart = lm.legY;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sx = x, sy = y;
+
+      if (p.longLegs > 0 && y > legStart) {
+        sy = legStart + (y - legStart) / legStretch;
+      }
+
+      if (p.bigEyes !== 0) {
+        [lm.leftEye, lm.rightEye].forEach(eye => {
+          const dx = sx - eye.x, dy = sy - eye.y;
+          const dist = Math.hypot(dx, dy);
+          const r = w * 0.075;
+          if (dist < r) {
+            const k = 1 - (p.bigEyes / 100) * 0.32 * Math.pow(1 - dist / r, 1.6);
+            sx = eye.x + dx * k;
+            sy = eye.y + dy * k;
+          }
+        });
+      }
+
+      if (p.slimFace !== 0) {
+        [lm.leftCheek, lm.rightCheek].forEach(chk => {
+          const dx = sx - chk.x, dy = sy - chk.y;
+          const dist = Math.hypot(dx, dy);
+          const r = w * 0.15;
+          if (dist < r) {
+            const pull = (p.slimFace / 100) * (w * 0.026) * Math.pow(1 - dist / r, 2);
+            sx += (chk.x < lm.cx ? -pull : pull);
+          }
+        });
+      }
+
+      if (p.slimNose !== 0) {
+        const dx = sx - lm.nose.x, dy = sy - lm.nose.y;
+        const dist = Math.hypot(dx, dy);
+        const r = w * 0.06;
+        if (dist < r) {
+          const k = 1 + (p.slimNose / 100) * 0.28 * Math.pow(1 - dist / r, 2);
+          sx = lm.nose.x + dx * k;
+        }
+      }
+
+      if (p.smile !== 0) {
+        [-1, 1].forEach(side => {
+          const cornerX = lm.mouth.x + side * lm.mouth.w;
+          const dist = Math.hypot(sx - cornerX, sy - lm.mouth.y);
+          const r = w * 0.055;
+          if (dist < r) {
+            sy += (p.smile / 100) * (h * 0.015) * Math.pow(1 - dist / r, 2);
+          }
+        });
+      }
+
+      if (p.slimWaist > 0) {
+        [-1, 1].forEach(side => {
+          const wx = lm.cx + side * (w * 0.18);
+          const dist = Math.hypot(sx - wx, sy - lm.waistY);
+          const r = w * 0.16;
+          if (dist < r) {
+            sx += side * (p.slimWaist / 100) * (w * 0.035) * Math.pow(1 - dist / r, 2);
+          }
+        });
+      }
+
+      sx = Math.max(0, Math.min(w - 1, Math.round(sx)));
+      sy = Math.max(0, Math.min(h - 1, Math.round(sy)));
+      const di = (y * w + x) * 4;
+      const si = (sy * w + sx) * 4;
+      d[di] = s[si]; d[di+1] = s[si+1]; d[di+2] = s[si+2]; d[di+3] = s[si+3];
+    }
+  }
+  ctx.putImageData(dstData, 0, 0);
+}
+
+function applyPixelAdjustments() {
+  const p = state.portrait;
+  const a = state.adj;
+  const f = state.filter;
+
+  if (p.smooth > 0) {
+    const blurCanvas = document.createElement('canvas');
+    blurCanvas.width = state.width; blurCanvas.height = state.height;
+    const bctx = blurCanvas.getContext('2d');
+    bctx.filter = `blur(${Math.max(2, Math.round(p.smooth * 0.14))}px)`;
+    bctx.drawImage(mainCanvas, 0, 0);
+
+    const orig = ctx.getImageData(0, 0, state.width, state.height);
+    const blur = bctx.getImageData(0, 0, state.width, state.height);
+    const od = orig.data, bd = blur.data;
+    const smoothRatio = (p.smooth / 100) * 0.72;
+    const detailKeep = (p.texture / 100) * 0.55;
+
+    for (let i = 0; i < od.length; i += 4) {
+      const r = od[i], g = od[i+1], b = od[i+2];
+      const isSkin = r > 95 && g > 40 && b > 20 && r > g && r > b && Math.abs(r - g) > 12;
+      if (isSkin) {
+        const highFreqR = r - bd[i];
+        const highFreqG = g - bd[i+1];
+        const highFreqB = b - bd[i+2];
+        od[i]   = clamp(r * (1 - smoothRatio) + bd[i] * smoothRatio + highFreqR * detailKeep);
+        od[i+1] = clamp(g * (1 - smoothRatio) + bd[i+1] * smoothRatio + highFreqG * detailKeep);
+        od[i+2] = clamp(b * (1 - smoothRatio) + bd[i+2] * smoothRatio + highFreqB * detailKeep);
+      }
+    }
+    ctx.putImageData(orig, 0, 0);
+  }
+
+  const lutR = buildCurveLUT(state.curves.r, state.curves.rgb);
+  const lutG = buildCurveLUT(state.curves.g, state.curves.rgb);
+  const lutB = buildCurveLUT(state.curves.b, state.curves.rgb);
+
+  const img = ctx.getImageData(0, 0, state.width, state.height);
+  const d = img.data;
+  const exp = a.exposure * 1.2;
+  const con = (a.contrast + 100) / 100;
+  const sat = (a.saturation + 100) / 100;
+  const tmp = a.temp * 0.6;
+  const wht = p.whiten * 0.35;
+  const fi = f.intensity / 100;
+
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i+3] === 0) continue;
+    let r = lutR[d[i]], g = lutG[d[i+1]], b = lutB[d[i+2]];
+
+    r = (r + exp + tmp + wht - 128) * con + 128;
+    g = (g + exp + wht - 128) * con + 128;
+    b = (b + exp - tmp + wht * 1.15 - 128) * con + 128;
+
+    const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    r = gray + (r - gray) * sat;
+    g = gray + (g - gray) * sat;
+    b = gray + (b - gray) * sat;
+
+    if (f.name !== 'none' && fi > 0) {
+      let fr = r, fg = g, fb = b;
+      if (f.name === 'cream') { fr = r * 1.04 + 10; fg = g * 1.03 + 8; fb = b * 1.02 + 12; }
+      else if (f.name === 'jpfilm') { fr = r * 0.96 + 8; fg = g * 1.02 + 10; fb = b * 1.06 + 14; }
+      else if (f.name === 'kcool') { fr = r * 0.98 + 6; fg = g * 1.01 + 8; fb = b * 1.08 + 16; }
+      else if (f.name === 'peach') { fr = r * 1.07 + 10; fg = g * 1.01 + 4; fb = b * 1.02 + 6; }
+      else if (f.name === 'hkretro') { fr = r * 1.08 + 6; fg = g * 0.98 + 4; fb = b * 0.88; }
+      else if (f.name === 'forest') { fr = r * 0.94; fg = g * 1.05 + 6; fb = b * 0.97 + 4; }
+      else if (f.name === 'french') { fr = gray * 0.35 + r * 0.65; fg = gray * 0.35 + g * 0.65; fb = gray * 0.32 + b * 0.68 + 6; }
+      else if (f.name === 'bw') { fr = fg = fb = gray * 1.05; }
+      r = r * (1 - fi) + fr * fi;
+      g = g * (1 - fi) + fg * fi;
+      b = b * (1 - fi) + fb * fi;
+    }
+
+    d[i] = clamp(r); d[i+1] = clamp(g); d[i+2] = clamp(b);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function applyAutoMakeup() {
+  const m = state.makeup;
+  const lm = state.landmarks;
+  if (!lm) return;
+
+  ctx.save();
+  if (m.foundation > 0 || state.portrait.darkCircle > 0) {
+    const alpha = Math.max(m.foundation * 0.0022, state.portrait.darkCircle * 0.0025);
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.fillStyle = `rgba(255, 240, 230, ${alpha})`;
+    ctx.beginPath(); ctx.ellipse(lm.cx, lm.cy, state.width * 0.16, state.height * 0.17, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  if (m.lens > 0) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = (m.lens / 100) * 0.65;
+    [lm.leftEye, lm.rightEye].forEach(eye => {
+      ctx.fillStyle = m.lensColor;
+      ctx.beginPath(); ctx.arc(eye.x, eye.y, 13, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.arc(eye.x, eye.y, 6, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  if (m.eyeshadow > 0) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = (m.eyeshadow / 100) * 0.45;
+    [lm.leftEye, lm.rightEye].forEach(eye => {
+      const grad = ctx.createRadialGradient(eye.x, eye.y - 6, 6, eye.x, eye.y - 6, 44);
+      grad.addColorStop(0, '#b56565'); grad.addColorStop(1, 'rgba(181,101,101,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.ellipse(eye.x, eye.y - 6, 44, 24, 0, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  if (m.eyeliner > 0) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = (m.eyeliner / 100) * 0.85;
+    ctx.strokeStyle = '#1f1614'; ctx.lineWidth = 3.5;
+    [lm.leftEye, lm.rightEye].forEach(eye => {
+      ctx.beginPath(); ctx.arc(eye.x, eye.y - 1, 33, Math.PI * 1.1, Math.PI * 1.92); ctx.stroke();
+    });
+  }
+
+  if (m.brow > 0) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = (m.brow / 100) * 0.55;
+    ctx.strokeStyle = '#3d2c24'; ctx.lineWidth = 9; ctx.lineCap = 'round';
+    [lm.leftBrow, lm.rightBrow].forEach(pts => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      const archY = m.browStyle === 'flat' ? pts[1].y + 5 : (m.browStyle === 'arch' ? pts[1].y - 6 : pts[1].y);
+      ctx.quadraticCurveTo(pts[1].x, archY, pts[2].x, pts[2].y);
+      ctx.stroke();
+    });
+  }
+
+  if (m.blush > 0) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = (m.blush / 100) * 0.42;
+    const offsetY = m.blushStyle === 'drunk' ? -18 : (m.blushStyle === 'contour' ? 12 : 0);
+    [lm.leftCheek, lm.rightCheek].forEach(chk => {
+      const grad = ctx.createRadialGradient(chk.x, chk.y + offsetY, 5, chk.x, chk.y + offsetY, 52);
+      grad.addColorStop(0, '#e87a7a'); grad.addColorStop(1, 'rgba(232,122,122,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(chk.x, chk.y + offsetY, 52, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+
+  if (m.contour > 0) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = (m.contour / 100) * 0.35;
+    ctx.strokeStyle = '#8c6249'; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.moveTo(lm.nose.x - 16, lm.nose.y - 55); ctx.lineTo(lm.nose.x - 16, lm.nose.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(lm.nose.x + 16, lm.nose.y - 55); ctx.lineTo(lm.nose.x + 16, lm.nose.y); ctx.stroke();
+
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = 'rgba(255,250,245,0.65)';
+    ctx.beginPath(); ctx.ellipse(lm.nose.x, lm.nose.y - 22, 5, 24, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  if (m.lipstick > 0) {
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = (m.lipstick / 100) * 0.72;
+    ctx.fillStyle = m.lipColor;
+    const scale = m.lipFinish === 'gradient' ? 0.68 : 1;
+    ctx.beginPath();
+    ctx.ellipse(lm.mouth.x, lm.mouth.y, lm.mouth.w * scale, lm.mouth.h * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (m.lipFinish === 'glossy') {
+      ctx.globalCompositeOperation = 'screen';
+      ctx.globalAlpha = (m.lipstick / 100) * 0.65;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.ellipse(lm.mouth.x - 10, lm.mouth.y + 4, 14, 3, -0.1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function drawOverlayLandmarks() {
+  octx.clearRect(0, 0, state.width, state.height);
+  if (!document.getElementById('chkShowLandmarks').checked || !state.landmarks) return;
+  const lm = state.landmarks;
+  octx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+  octx.fillStyle = '#38bdf8';
+  octx.lineWidth = 1.5;
+  [lm.leftEye, lm.rightEye, lm.nose, lm.mouth, lm.leftCheek, lm.rightCheek, lm.chin].forEach(pt => {
+    octx.beginPath(); octx.arc(pt.x, pt.y, 5, 0, Math.PI * 2); octx.fill();
+  });
+  octx.beginPath(); octx.ellipse(lm.cx, lm.cy, state.width * 0.16, state.height * 0.17, 0, 0, Math.PI * 2); octx.stroke();
+}
+
+let isDrawing = false, lastPt = null, initialPinchDist = 0, initialZoom = 1;
+
+function getCanvasPoint(clientX, clientY) {
+  const rect = mainCanvas.getBoundingClientRect();
+  return {
+    x: (clientX - rect.left) * (state.width / rect.width),
+    y: (clientY - rect.top) * (state.height / rect.height)
+  };
+}
+
+function updateLoupe(pt, show) {
+  const loupe = document.getElementById('loupe');
+  if (!show || state.tool === 'move') { loupe.classList.add('hidden'); return; }
+  loupe.classList.remove('hidden');
+  const lctx = document.getElementById('loupeCanvas').getContext('2d');
+  lctx.clearRect(0, 0, 112, 112);
+  lctx.drawImage(mainCanvas, pt.x - 28, pt.y - 28, 56, 56, 0, 0, 112, 112);
+}
+
+function applyBrushStroke(pt) {
+  const layer = getActiveLayer();
+  if (!layer || layer.type !== 'image') return;
+  const lctx = layer.canvas.getContext('2d', { willReadFrequently: true });
+  const r = state.brushSize;
+  const str = state.brushStrength / 100;
+
+  if (state.tool === 'liquify' && lastPt) {
+    const dx = (pt.x - lastPt.x) * str * 0.75;
+    const dy = (pt.y - lastPt.y) * str * 0.75;
+    const x0 = Math.max(0, Math.floor(pt.x - r)), y0 = Math.max(0, Math.floor(pt.y - r));
+    const w = Math.min(state.width - x0, r * 2), h = Math.min(state.height - y0, r * 2);
+    if (w <= 0 || h <= 0) return;
+    const img = lctx.getImageData(x0, y0, w, h);
+    const copy = new Uint8ClampedArray(img.data);
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dist = Math.hypot(x0 + x - pt.x, y0 + y - pt.y);
+        if (dist < r) {
+          const f = Math.pow(1 - dist / r, 2);
+          let sx = x - dx * f, sy = y - dy * f;
+          if (state.liquifyMode === 'bloat') {
+            sx = x - (x0 + x - pt.x) * 0.12 * str * f;
+            sy = y - (y0 + y - pt.y) * 0.12 * str * f;
+          } else if (state.liquifyMode === 'pucker') {
+            sx = x + (x0 + x - pt.x) * 0.12 * str * f;
+            sy = y + (y0 + y - pt.y) * 0.12 * str * f;
+          }
+          sx = Math.max(0, Math.min(w - 1, Math.round(sx)));
+          sy = Math.max(0, Math.min(h - 1, Math.round(sy)));
+          const di = (y * w + x) * 4, si = (sy * w + sx) * 4;
+          img.data[di] = copy[si]; img.data[di+1] = copy[si+1]; img.data[di+2] = copy[si+2];
+        }
+      }
+    }
+    lctx.putImageData(img, x0, y0);
+  } else if (state.tool === 'heal' || state.tool === 'inpaint') {
+    const sampleOffset = state.tool === 'inpaint' ? r * 1.4 : r * 0.9;
+    const sx = Math.max(0, Math.min(state.width - r * 2, pt.x - r + sampleOffset));
+    const sy = Math.max(0, Math.min(state.height - r * 2, pt.y - r));
+    lctx.save();
+    lctx.beginPath(); lctx.arc(pt.x, pt.y, r * 0.65, 0, Math.PI * 2); lctx.clip();
+    lctx.filter = state.tool === 'heal' ? 'blur(3px)' : 'blur(1.5px)';
+    lctx.globalAlpha = 0.85;
+    lctx.drawImage(layer.canvas, sx, sy, r * 1.3, r * 1.3, pt.x - r * 0.65, pt.y - r * 0.65, r * 1.3, r * 1.3);
+    lctx.restore();
+  }
+  renderAll();
+}
+
+function magicWandCutout(pt) {
+  const layer = getActiveLayer();
+  if (!layer || layer.type !== 'image') return;
+  const lctx = layer.canvas.getContext('2d');
+  const img = lctx.getImageData(0, 0, state.width, state.height);
+  const d = img.data;
+  const px = Math.floor(pt.x), py = Math.floor(pt.y);
+  const idx = (py * state.width + px) * 4;
+  const tr = d[idx], tg = d[idx+1], tb = d[idx+2];
+  const tol = parseInt(document.getElementById('bgTolerance').value);
+
+  for (let i = 0; i < d.length; i += 4) {
+    const diff = Math.hypot(d[i] - tr, d[i+1] - tg, d[i+2] - tb);
+    if (diff < tol) d[i+3] = 0;
+  }
+  lctx.putImageData(img, 0, 0);
+  saveHistory();
+  renderAll();
+}
+
+container.addEventListener('pointerdown', e => {
+  const pt = getCanvasPoint(e.clientX, e.clientY);
+  isDrawing = true; lastPt = pt;
+  if (state.tool === 'wand') { magicWandCutout(pt); isDrawing = false; return; }
+  if (state.tool !== 'move') { applyBrushStroke(pt); updateLoupe(pt, true); }
+});
+
+container.addEventListener('pointermove', e => {
+  if (!isDrawing) return;
+  const pt = getCanvasPoint(e.clientX, e.clientY);
+  if (state.tool === 'move') {
+    state.panX += e.movementX;
+    state.panY += e.movementY;
+    updateTransform();
+  } else {
+    applyBrushStroke(pt);
+    updateLoupe(pt, true);
+  }
+  lastPt = pt;
+});
+
+window.addEventListener('pointerup', () => {
+  if (isDrawing && state.tool !== 'move') saveHistory();
+  isDrawing = false;
+  updateLoupe(null, false);
+});
+
+container.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    isDrawing = false;
+    initialPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    initialZoom = state.zoom;
+  }
+}, { passive: true });
+
+container.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    state.zoom = Math.max(0.2, Math.min(3, initialZoom * (dist / initialPinchDist)));
+    updateTransform();
+  }
+}, { passive: true });
+
+container.addEventListener('wheel', e => {
+  e.preventDefault();
+  state.zoom = Math.max(0.2, Math.min(3, state.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+  updateTransform();
+}, { passive: false });
+
+function updateTransform() {
+  wrapper.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+  document.getElementById('infoZoom').textContent = Math.round(state.zoom * 100) + '%';
+}
+
+function fitCanvasToScreen() {
+  const rect = container.getBoundingClientRect();
+  state.zoom = Math.min((rect.width - 40) / state.width, (rect.height - 50) / state.height, 1);
+  state.panX = 0; state.panY = 0;
+  updateTransform();
+}
+
+function buildCurveLUT(chPts, rgbPts) {
+  const lut = new Uint8Array(256);
+  const evalPts = (pts, x) => {
+    const sorted = [...pts].sort((a, b) => a.x - b.x);
+    if (x <= sorted[0].x) return sorted[0].y;
+    if (x >= sorted[sorted.length - 1].x) return sorted[sorted.length - 1].y;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (x >= sorted[i].x && x <= sorted[i+1].x) {
+        const t = (x - sorted[i].x) / (sorted[i+1].x - sorted[i].x);
+        return sorted[i].y + t * (sorted[i+1].y - sorted[i].y);
+      }
+    }
+    return x;
+  };
+  for (let i = 0; i < 256; i++) {
+    const v1 = evalPts(chPts, i);
+    lut[i] = clamp(evalPts(rgbPts, v1));
+  }
+  return lut;
+}
+
+function drawCurveEditor() {
+  const c = document.getElementById('curveCanvas');
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  g.strokeStyle = '#2d2d2d'; g.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    g.beginPath(); g.moveTo(c.width * i / 4, 0); g.lineTo(c.width * i / 4, c.height); g.stroke();
+    g.beginPath(); g.moveTo(0, c.height * i / 4); g.lineTo(c.width, c.height * i / 4); g.stroke();
+  }
+  const pts = [...state.curves[state.curves.active]].sort((a, b) => a.x - b.x);
+  const colors = { rgb: '#ffffff', r: '#f87171', g: '#4ade80', b: '#60a5fa' };
+  g.strokeStyle = colors[state.curves.active]; g.lineWidth = 2;
+  g.beginPath();
+  pts.forEach((p, idx) => {
+    const px = (p.x / 255) * c.width, py = c.height - (p.y / 255) * c.height;
+    idx === 0 ? g.moveTo(px, py) : g.lineTo(px, py);
+  });
+  g.stroke();
+  pts.forEach(p => {
+    const px = (p.x / 255) * c.width, py = c.height - (p.y / 255) * c.height;
+    g.fillStyle = colors[state.curves.active];
+    g.beginPath(); g.arc(px, py, 4.5, 0, Math.PI * 2); g.fill();
+  });
+}
+
+const curveCanvas = document.getElementById('curveCanvas');
+let dragCurveIdx = -1;
+curveCanvas.addEventListener('pointerdown', e => {
+  const rect = curveCanvas.getBoundingClientRect();
+  const x = ((e.clientX - rect.left) / rect.width) * 255;
+  const y = 255 - ((e.clientY - rect.top) / rect.height) * 255;
+  const pts = state.curves[state.curves.active];
+  dragCurveIdx = pts.findIndex(p => Math.hypot(p.x - x, p.y - y) < 18);
+  if (dragCurveIdx === -1) {
+    pts.push({ x: Math.round(x), y: Math.round(y) });
+    dragCurveIdx = pts.length - 1;
+  }
+  drawCurveEditor(); renderAll();
+});
+curveCanvas.addEventListener('pointermove', e => {
+  if (dragCurveIdx === -1) return;
+  const rect = curveCanvas.getBoundingClientRect();
+  const pts = state.curves[state.curves.active];
+  pts[dragCurveIdx].x = clamp(((e.clientX - rect.left) / rect.width) * 255);
+  pts[dragCurveIdx].y = clamp(255 - ((e.clientY - rect.top) / rect.height) * 255);
+  drawCurveEditor(); renderAll();
+});
+window.addEventListener('pointerup', () => dragCurveIdx = -1);
+
+function clamp(v) { return Math.max(0, Math.min(255, Math.round(v))); }
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
+  });
+});
+
+function setTool(tool) {
+  state.tool = tool;
+  document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
+  document.querySelectorAll('.mob-tool').forEach(b => b.classList.toggle('text-sky-400', b.dataset.tool === tool));
+  const bar = document.getElementById('brushBar');
+  const titles = { liquify: '液化變形', heal: '祛斑修復筆', inpaint: 'AI 智慧消除筆', wand: '魔術棒去背' };
+  if (titles[tool]) {
+    bar.classList.remove('hidden');
+    document.getElementById('brushTitle').textContent = titles[tool];
+    document.getElementById('liquifyModes').classList.toggle('hidden', tool !== 'liquify');
+  } else {
+    bar.classList.add('hidden');
+  }
+}
+
+document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+document.querySelectorAll('.liq-mode').forEach(b => b.addEventListener('click', () => {
+  state.liquifyMode = b.dataset.mode;
+  document.querySelectorAll('.liq-mode').forEach(x => x.classList.remove('bg-sky-600', 'text-white'));
+  b.classList.add('bg-sky-600', 'text-white');
+}));
+
+document.getElementById('brushSize').addEventListener('input', e => {
+  state.brushSize = +e.target.value;
+  document.getElementById('brushSizeVal').textContent = state.brushSize;
+});
+document.getElementById('brushStrength').addEventListener('input', e => state.brushStrength = +e.target.value);
+
+document.querySelectorAll('[data-param]').forEach(inp => inp.addEventListener('input', e => {
+  state.portrait[e.target.dataset.param] = +e.target.value;
+  e.target.nextElementSibling.textContent = e.target.value;
+  renderAll();
+}));
+
+document.querySelectorAll('[data-mk]').forEach(inp => inp.addEventListener('input', e => {
+  state.makeup[e.target.dataset.mk] = +e.target.value;
+  if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = e.target.value;
+  renderAll();
+}));
+
+document.querySelectorAll('[data-adj]').forEach(inp => inp.addEventListener('input', e => {
+  state.adj[e.target.dataset.adj] = +e.target.value;
+  e.target.nextElementSibling.textContent = e.target.value;
+  renderAll();
+}));
+
+const PRESETS = {
+  natural: { foundation: 35, brow: 30, eyeshadow: 20, eyeliner: 25, lens: 20, blush: 25, contour: 20, lipstick: 35, lipColor: '#e07a5f', lipFinish: 'glossy' },
+  peach:   { foundation: 45, brow: 35, eyeshadow: 45, eyeliner: 35, lens: 35, blush: 55, contour: 25, lipstick: 55, lipColor: '#e07a5f', lipFinish: 'glossy' },
+  korean:  { foundation: 60, brow: 40, eyeshadow: 35, eyeliner: 45, lens: 50, blush: 30, contour: 40, lipstick: 60, lipColor: '#d96b6b', lipFinish: 'gradient' },
+  tipsy:   { foundation: 40, brow: 30, eyeshadow: 50, eyeliner: 30, lens: 40, blush: 70, blushStyle: 'drunk', contour: 20, lipstick: 65, lipColor: '#c93b4b', lipFinish: 'glossy' },
+  smoky:   { foundation: 50, brow: 65, eyeshadow: 75, eyeliner: 80, lens: 65, lensColor: '#5b6d7c', blush: 35, contour: 65, lipstick: 60, lipColor: '#d96b6b', lipFinish: 'matte' },
+  hk:      { foundation: 55, brow: 70, eyeshadow: 55, eyeliner: 75, lens: 30, blush: 40, contour: 60, lipstick: 85, lipColor: '#8e2430', lipFinish: 'matte' }
+};
+
+document.querySelectorAll('.preset-btn').forEach(btn => btn.addEventListener('click', () => {
+  Object.assign(state.makeup, PRESETS[btn.dataset.preset]);
+  document.querySelectorAll('[data-mk]').forEach(inp => {
+    inp.value = state.makeup[inp.dataset.mk];
+    if (inp.nextElementSibling) inp.nextElementSibling.textContent = inp.value;
+  });
+  renderAll();
+}));
+
+document.getElementById('btnClearMakeup').addEventListener('click', () => {
+  Object.keys(state.makeup).forEach(k => { if (typeof state.makeup[k] === 'number') state.makeup[k] = 0; });
+  document.querySelectorAll('[data-mk]').forEach(inp => { inp.value = 0; if (inp.nextElementSibling) inp.nextElementSibling.textContent = 0; });
+  renderAll();
+});
+
+document.querySelectorAll('#lipColors button').forEach(b => b.addEventListener('click', () => { state.makeup.lipColor = b.dataset.color; renderAll(); }));
+document.getElementById('mkLipFinish').addEventListener('change', e => { state.makeup.lipFinish = e.target.value; renderAll(); });
+document.getElementById('mkBrowStyle').addEventListener('change', e => { state.makeup.browStyle = e.target.value; renderAll(); });
+document.getElementById('mkLensColor').addEventListener('change', e => { state.makeup.lensColor = e.target.value; renderAll(); });
+document.getElementById('mkBlushStyle').addEventListener('change', e => { state.makeup.blushStyle = e.target.value; renderAll(); });
+
+document.querySelectorAll('.filter-btn').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.filter.name = btn.dataset.filter;
+  renderAll();
+}));
+document.getElementById('filterIntensity').addEventListener('input', e => {
+  state.filter.intensity = +e.target.value;
+  e.target.nextElementSibling.textContent = e.target.value + '%';
+  renderAll();
+});
+
+document.getElementById('btnAddText').addEventListener('click', () => {
+  const txt = document.getElementById('textLayerInput').value.trim() || 'VOGUE PORTRAIT';
+  const color = document.getElementById('textLayerColor').value;
+  const id = 'layer_' + Date.now();
+  state.layers.push({ id, name: '文字: ' + txt, visible: true, opacity: 1, blend: 'source-over', type: 'text', x: state.width * 0.15, y: state.height * 0.16, meta: { text: txt, color, size: 58 } });
+  state.activeLayerId = id;
+  updateLayerPanel(); renderAll();
+});
+
+document.querySelectorAll('.sticker-btn').forEach(b => b.addEventListener('click', () => {
+  const id = 'layer_' + Date.now();
+  state.layers.push({ id, name: '貼紙 ' + b.textContent, visible: true, opacity: 1, blend: 'source-over', type: 'sticker', x: state.width * 0.65, y: state.height * 0.25, meta: { emoji: b.textContent, size: 92 } });
+  state.activeLayerId = id;
+  updateLayerPanel(); renderAll();
+}));
+
+document.getElementById('btnAutoCutout').addEventListener('click', () => {
+  const layer = getActiveLayer();
+  if (!layer || layer.type !== 'image') return;
+  const lctx = layer.canvas.getContext('2d');
+  const img = lctx.getImageData(0, 0, state.width, state.height);
+  const d = img.data;
+  const br = d[0], bg = d[1], bb = d[2];
+  const tol = parseInt(document.getElementById('bgTolerance').value);
+  for (let i = 0; i < d.length; i += 4) {
+    const dist = Math.hypot(d[i] - br, d[i+1] - bg, d[i+2] - bb);
+    if (dist < tol) d[i+3] = 0;
+    else if (dist < tol + 15) d[i+3] = Math.round(((dist - tol) / 15) * 255);
+  }
+  lctx.putImageData(img, 0, 0);
+  saveHistory(); renderAll();
+});
+
+document.querySelectorAll('.bg-preset').forEach(b => b.addEventListener('click', () => { state.bgColor = b.dataset.bg; renderAll(); }));
+document.getElementById('btnSelectInpaint').addEventListener('click', () => setTool('inpaint'));
+document.getElementById('btnSelectHeal').addEventListener('click', () => setTool('heal'));
+
+function updateLayerPanel() {
+  const list = document.getElementById('layerList');
+  list.innerHTML = '';
+  [...state.layers].reverse().forEach(l => {
+    const row = document.createElement('div');
+    row.className = `flex items-center justify-between p-2 rounded border text-xs cursor-pointer ${l.id === state.activeLayerId ? 'bg-sky-900/40 border-sky-500' : 'bg-[#1f1f1f] border-[#3a3a3a]'}`;
+    row.innerHTML = `<span class="truncate">${l.name}</span><button class="text-gray-400 hover:text-white px-1">${l.visible ? '👁' : '🚫'}</button>`;
+    row.onclick = () => { state.activeLayerId = l.id; updateLayerPanel(); };
+    row.querySelector('button').onclick = e => { e.stopPropagation(); l.visible = !l.visible; updateLayerPanel(); renderAll(); };
+    list.appendChild(row);
+  });
+}
+
+function loadImageFile(file, asNewLayer = false) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      if (!asNewLayer) {
+        state.width = c.width; state.height = c.height;
+        mainCanvas.width = overlayCanvas.width = state.width;
+        mainCanvas.height = overlayCanvas.height = state.height;
+        state.layers = [];
+        document.getElementById('infoResolution').textContent = `${state.width} × ${state.height} px (1:1 原畫質)`;
+      }
+      addLayer(file.name, c);
+      state.landmarks = getDefaultLandmarks();
+      fitCanvasToScreen(); saveHistory(); renderAll();
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+document.getElementById('fileInput').addEventListener('change', e => loadImageFile(e.target.files[0], false));
+document.getElementById('layerInput').addEventListener('change', e => loadImageFile(e.target.files[0], true));
+
+document.getElementById('btnUndo').addEventListener('click', undo);
+document.getElementById('btnRedo').addEventListener('click', redo);
+document.getElementById('btnZoomIn').addEventListener('click', () => { state.zoom *= 1.15; updateTransform(); });
+document.getElementById('btnZoomOut').addEventListener('click', () => { state.zoom *= 0.85; updateTransform(); });
+document.getElementById('btnZoomFit').addEventListener('click', fitCanvasToScreen);
+document.getElementById('chkShowLandmarks').addEventListener('change', drawOverlayLandmarks);
+document.getElementById('btnToggleMobile').addEventListener('click', () => { document.body.classList.toggle('mobile-preview'); setTimeout(fitCanvasToScreen, 100); });
+
+const cmp = document.getElementById('btnCompare');
+cmp.addEventListener('pointerdown', () => { state.comparing = true; renderAll(); });
+window.addEventListener('pointerup', () => { if (state.comparing) { state.comparing = false; renderAll(); } });
+
+document.querySelectorAll('.ch-btn').forEach(b => b.addEventListener('click', () => {
+  state.curves.active = b.dataset.ch;
+  drawCurveEditor();
+}));
+document.getElementById('btnResetCurves').addEventListener('click', () => {
+  state.curves[state.curves.active] = [{x:0,y:0},{x:255,y:255}];
+  drawCurveEditor(); renderAll();
+});
+
+document.getElementById('btnResetPortrait').addEventListener('click', () => {
+  Object.keys(state.portrait).forEach(k => state.portrait[k] = k === 'texture' ? 75 : 0);
+  document.querySelectorAll('[data-param]').forEach(inp => { inp.value = state.portrait[inp.dataset.param]; inp.nextElementSibling.textContent = inp.value; });
+  renderAll();
+});
+
+document.getElementById('btnExportModal').addEventListener('click', () => document.getElementById('exportModal').classList.remove('hidden'));
+document.getElementById('btnCloseExport').addEventListener('click', () => document.getElementById('exportModal').classList.add('hidden'));
+document.getElementById('exportQuality').addEventListener('input', e => document.getElementById('exportQualityVal').textContent = e.target.value + '%');
+
+document.getElementById('btnConfirmExport').addEventListener('click', () => {
+  const fmt = document.getElementById('exportFormat').value;
+  const q = parseInt(document.getElementById('exportQuality').value) / 100;
+  const scale = parseFloat(document.getElementById('exportScale').value);
+  const out = document.createElement('canvas');
+  out.width = Math.round(state.width * scale);
+  out.height = Math.round(state.height * scale);
+  out.getContext('2d').drawImage(mainCanvas, 0, 0, out.width, out.height);
+  const ext = fmt.split('/')[1];
+  const link = document.createElement('a');
+  link.download = `PhotoStudioPro_HD.${ext}`;
+  link.href = out.toDataURL(fmt, q);
+  link.click();
+  document.getElementById('exportModal').classList.add('hidden');
+});
+
+initApp();
+</script>
+</body>
+</html>
